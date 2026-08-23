@@ -97,6 +97,26 @@
       const cameraButton = document.querySelector("#camera");
       const enableAudioButton = document.querySelector("#enable-audio");
       const toastContainer = document.querySelector("#toast-container");
+      const cloudflareIceServers = [
+        {
+          urls: [
+            "stun:stun.cloudflare.com:3478",
+            "stun:stun.cloudflare.com:53",
+          ],
+        },
+        {
+          urls: [
+            "turn:turn.cloudflare.com:3478?transport=udp",
+            "turn:turn.cloudflare.com:3478?transport=tcp",
+            "turns:turn.cloudflare.com:5349?transport=tcp",
+            "turn:turn.cloudflare.com:53?transport=udp",
+            "turn:turn.cloudflare.com:80?transport=tcp",
+            "turns:turn.cloudflare.com:443?transport=tcp",
+          ],
+          username: "g0d0bd6627cd65f44d6ae5931bdeef9840e46f2e511fe45e22d657d0c2f10b09",
+          credential: "1bbf72b1be005e1a6047835e63c1e445b54d163a9800c71366bf28682cf49856",
+        },
+      ];
 
       function errorMessage(error) {
         if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -258,6 +278,7 @@
         event.preventDefault();
         try {
           room = new Room({
+            rtcConfig: { iceServers: cloudflareIceServers },
             adaptiveStream: true,
             dynacast: true,
             audioCaptureDefaults: {
