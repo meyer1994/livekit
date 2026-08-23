@@ -34,10 +34,12 @@ joins its room, it sends one reliable data message:
 Hello from the LiveKit agent!
 ```
 
-It also transcribes microphone audio with OpenAI STT. Each final transcript is
-sent back as a reliable data message prefixed with `Echo:`. The agent uses
-Silero VAD with a slightly higher activation threshold and a longer silence
-window to avoid false starts and cutting off speech.
+It also transcribes microphone audio with OpenAI STT and speaks the response
+back with OpenAI TTS. Each final transcript is sent as a reliable data message
+prefixed with `Echo:` and spoken aloud. The agent uses Silero VAD with a longer
+silence window and prefix padding to avoid false starts, lost first syllables,
+and cutting off speech. The browser never plays its local microphone track back
+through the speakers.
 
 Follow the agent logs with:
 

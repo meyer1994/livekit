@@ -55,6 +55,7 @@
           <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <h2 class="card-title">Room: <span id="room-label"></span></h2>
             <div class="flex flex-wrap gap-2">
+              <button id="enable-audio" class="btn btn-primary hidden" type="button">Enable audio</button>
               <button id="microphone" class="btn btn-outline" type="button">Enable microphone</button>
               <button id="camera" class="btn btn-outline" type="button">Enable camera</button>
             </div>
@@ -86,6 +87,7 @@
       const logOutput = document.querySelector("#log");
       const microphoneButton = document.querySelector("#microphone");
       const cameraButton = document.querySelector("#camera");
+      const enableAudioButton = document.querySelector("#enable-audio");
 
       function log(message) {
         const line = document.createElement("div");
@@ -104,6 +106,10 @@
       }
 
       function attachTrack(track, participant) {
+        // Never play the local microphone back through the speakers. The local
+        // track is published to LiveKit, while only remote audio is attached.
+        if (participant === room.localParticipant && track.kind === "audio") return;
+
         const wrapper = document.createElement("div");
         wrapper.className = "track";
         wrapper.dataset.trackSid = track.sid;
@@ -124,6 +130,10 @@
       }
 
       function bindRoomEvents() {
+        room.on(RoomEvent, (publication, participant) => {
+          console.log(publication, participant);
+        });
+
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           attachTrack(track, participant);
           log(`Subscribed to ${participant.identity}'s ${track.kind} track`);
@@ -132,10 +142,12 @@
         room.on(RoomEvent.TrackUnsubscribed, (track) => removeTrack(track));
 
         room.on(RoomEvent.LocalTrackPublished, (publication) => {
+          log(`Published local ${publication.kind} track`);
           if (publication.track) attachTrack(publication.track, room.localParticipant);
         });
 
         room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+          log(`Unpublished local ${publication.kind} track`);
           if (publication.track) removeTrack(publication.track);
         });
 
@@ -152,8 +164,15 @@
           log(`${participant?.identity || "room"}${topic ? ` [${topic}]` : ""}: ${message}`);
         });
 
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+          const blocked = !room.canPlaybackAudio;
+          enableAudioButton.classList.toggle("hidden", !blocked);
+          if (blocked) log("Browser blocked audio playback; click Enable audio");
+        });
+
         room.on(RoomEvent.Disconnected, () => {
           setConnected(false);
+          enableAudioButton.classList.add("hidden");
           log("Disconnected from LiveKit");
         });
       }
@@ -173,6 +192,11 @@
           });
           bindRoomEvents();
           await room.connect(serverUrl.value.trim(), token.value.trim(), { autoSubscribe: true });
+          try {
+            await room.startAudio();
+          } catch (error) {
+            log(`Audio playback needs permission: ${error.message}`);
+          }
           roomLabel.textContent = room.name || roomName.value.trim();
           setConnected(true);
           log(`Connected as ${room.localParticipant.identity}`);
@@ -193,6 +217,17 @@
         microphoneButton.textContent = "Enable microphone";
         cameraButton.textContent = "Enable camera";
         setConnected(false);
+      });
+
+      enableAudioButton.addEventListener("click", async () => {
+        if (!room) return;
+        try {
+          await room.startAudio();
+          enableAudioButton.classList.add("hidden");
+          log("Audio playback enabled");
+        } catch (error) {
+          log(`Audio playback error: ${error.message}`);
+        }
       });
 
       microphoneButton.addEventListener("click", async () => {
