@@ -120,7 +120,7 @@ class RoomAgent(Agent):
         self.participant = await self.ctx.wait_for_participant()
         identity = self.participant.identity
         logger.info("connected to participant %s", identity)
-        await self._publish_debug("participant_connected", participant=identity)
+        self._spawn(self._publish_debug("participant_connected", participant=identity))
 
         self.ctx.room.on("track_subscribed", self._on_track_subscribed)
         self.ctx.room.on("track_unsubscribed", self._on_track_unsubscribed)
@@ -140,7 +140,8 @@ class RoomAgent(Agent):
         self.ctx.room.on("participant_disconnected", lambda *_: self.shutdown.set())
         self.ctx.room.on("disconnected", lambda *_: self.shutdown.set())
 
-        await self._publish_debug("realtime_session_starting", participant=identity)
+        logger.info("starting realtime session")
+        self._spawn(self._publish_debug("realtime_session_starting", participant=identity))
         try:
             await self._agent_session.start(
                 room=self.ctx.room,
@@ -154,18 +155,24 @@ class RoomAgent(Agent):
                     text_input=False,
                 ),
             )
+            logger.info("realtime session started")
         except Exception as error:
             logger.exception("failed to start realtime session")
-            await self._publish_debug("realtime_session_error", error=error)
+            self._spawn(self._publish_debug("realtime_session_error", error=error))
             raise
 
-        await self._publish_debug("room_ready", room=self.ctx.room.name, participant=identity)
+        self._spawn(self._publish_debug("room_ready", room=self.ctx.room.name, participant=identity))
+        self._spawn(self._greet())
         await self.shutdown.wait()
 
-    async def on_enter(self):
-        await self._agent_session.generate_reply(
-            instructions="Greet the participant briefly and say you are ready to echo them."
-        )
+    async def _greet(self):
+        try:
+            await self._agent_session.generate_reply(
+                instructions="Greet the participant briefly and say you are ready to echo them."
+            )
+        except Exception:
+            logger.exception("failed to greet participant")
+            await self._publish_debug("greeting_error")
 
     async def close(self):
         self.shutdown.set()
