@@ -148,7 +148,8 @@ class RoomAgent(Agent):
                 agent=self,
                 room_options=room_io.RoomOptions(
                     participant_identity=identity,
-                    close_on_disconnect=False,
+                    close_on_disconnect=True,
+                    delete_room_on_close=True,
                     audio_input=True,
                     audio_output=room_io.AudioOutputOptions(track_name="agent_audio"),
                     text_output=False,
