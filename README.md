@@ -2,7 +2,7 @@
 
 This is the smallest local setup: a LiveKit server and a Python agent started by
 Docker Compose. The agent's dependencies are managed with `uv` and pinned in
-`agent/uv.lock`.
+`uv.lock`.
 
 ## Start it
 
