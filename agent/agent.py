@@ -17,7 +17,12 @@ class RoomAgent(Agent):
     """Thin room abstraction: one agent session and one participant per room."""
 
     def __init__(self, *, ctx: JobContext, session: AgentSession):
-        super().__init__(instructions="Transcribe and echo the participant's speech.")
+        super().__init__(
+            instructions=(
+                "Always respond in English. Transcribe and echo the participant's speech. "
+                "Never respond in another language."
+            )
+        )
         self.ctx = ctx
         self._agent_session = session
         self.participant: rtc.RemoteParticipant | None = None
@@ -169,7 +174,7 @@ class RoomAgent(Agent):
     async def _greet(self):
         try:
             await self._agent_session.generate_reply(
-                instructions="Greet the participant briefly and say you are ready to echo them."
+                instructions="Greet the participant briefly in English and say you are ready to echo them."
             )
         except Exception:
             logger.exception("failed to greet participant")
@@ -191,6 +196,7 @@ def new_session() -> AgentSession:
             voice="marin",
             input_audio_transcription=realtime.AudioTranscription(
                 model="gpt-4o-transcribe",
+                language="en",
             ),
             turn_detection=realtime.realtime_audio_input_turn_detection.SemanticVad(
                 type="semantic_vad",
