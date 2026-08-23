@@ -17,7 +17,7 @@
     </style>
   </head>
   <body>
-    <main class="container mx-auto max-w-5xl px-4 py-10">
+    <main class="container mx-auto max-w-7xl px-4 py-10">
       <div class="mb-8">
         <h1 class="text-4xl font-bold">LiveKit local room</h1>
         <p class="mt-2 text-base-content/70">Connect to a LiveKit room, publish your camera and microphone, and receive the agent greeting.</p>
@@ -61,7 +61,16 @@
             </div>
           </div>
           <div id="track-grid" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
-          <div id="log" class="log mockup-code mt-5 p-4 text-sm" aria-live="polite"></div>
+          <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div>
+              <h3 class="mb-2 font-semibold">User transcriptions</h3>
+              <div id="transcript-log" class="log mockup-code p-4 text-sm" aria-live="polite"></div>
+            </div>
+            <div>
+              <h3 class="mb-2 font-semibold">Debug events</h3>
+              <div id="debug-log" class="log mockup-code p-4 text-sm" aria-live="polite"></div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
@@ -84,16 +93,25 @@
       const roomPanel = document.querySelector("#room-panel");
       const roomLabel = document.querySelector("#room-label");
       const trackGrid = document.querySelector("#track-grid");
-      const logOutput = document.querySelector("#log");
+      const transcriptLogOutput = document.querySelector("#transcript-log");
+      const debugLogOutput = document.querySelector("#debug-log");
       const microphoneButton = document.querySelector("#microphone");
       const cameraButton = document.querySelector("#camera");
       const enableAudioButton = document.querySelector("#enable-audio");
 
-      function log(message) {
+      function appendLog(output, message) {
         const line = document.createElement("div");
         line.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
-        logOutput.append(line);
-        logOutput.scrollTop = logOutput.scrollHeight;
+        output.append(line);
+        output.scrollTop = output.scrollHeight;
+      }
+
+      function log(message) {
+        appendLog(debugLogOutput, message);
+      }
+
+      function logTranscript(message) {
+        appendLog(transcriptLogOutput, message);
       }
 
       function setConnected(connected) {
@@ -130,10 +148,6 @@
       }
 
       function bindRoomEvents() {
-        room.on(RoomEvent, (publication, participant) => {
-          console.log(publication, participant);
-        });
-
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           attachTrack(track, participant);
           log(`Subscribed to ${participant.identity}'s ${track.kind} track`);
@@ -161,7 +175,29 @@
 
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
           const message = new TextDecoder().decode(payload);
-          log(`${participant?.identity || "room"}${topic ? ` [${topic}]` : ""}: ${message}`);
+          const sender = participant?.identity || "room";
+          const formatted = `${sender}${topic ? ` [${topic}]` : ""}: ${message}`;
+
+          if (topic === "stt-transcript") {
+            try {
+              const transcript = JSON.parse(message);
+              logTranscript(`${transcript.participant}: ${transcript.text}`);
+            } catch {
+              logTranscript(formatted);
+            }
+          } else if (topic === "agent-debug") {
+            try {
+              const debug = JSON.parse(message);
+              const details = Object.entries(debug.details || {})
+                .map(([key, value]) => `${key}=${value}`)
+                .join(" ");
+              log(`${sender}: ${debug.event}${details ? ` (${details})` : ""}`);
+            } catch {
+              log(formatted);
+            }
+          } else {
+            log(formatted);
+          }
         });
 
         room.on(RoomEvent.AudioPlaybackStatusChanged, () => {

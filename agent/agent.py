@@ -1,114 +1,205 @@
 import asyncio
+import json
 import logging
+import time
 
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, room_io
-from livekit.plugins import openai, silero
+from livekit import rtc
+from livekit.agents import Agent, AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli, room_io
+from livekit.plugins import openai
+from openai.types import realtime
 
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("room-agent")
 
 
-async def entrypoint(ctx: JobContext):
-    """Transcribe speech and send the final transcript back as data."""
-    logging.info("Starting agent")
-    session = AgentSession(
-        stt=openai.STT(model="gpt-4o-mini-transcribe"),
-        tts=openai.TTS(
-            model="gpt-4o-mini-tts",
-            voice="ash",
-            instructions="Speak clearly and conversationally.",
-        ),
-        vad=silero.VAD.load(
-            activation_threshold=0.55,
-            min_speech_duration=0.15,
-            min_silence_duration=0.5,
-            prefix_padding_duration=0.6,
-        ),
-    )
+class RoomAgent(Agent):
+    """Thin room abstraction: one agent session and one participant per room."""
 
-    participant = None
-    shutdown = asyncio.Event()
+    def __init__(self, *, ctx: JobContext, session: AgentSession):
+        super().__init__(instructions="Transcribe and echo the participant's speech.")
+        self.ctx = ctx
+        self._agent_session = session
+        self.participant: rtc.RemoteParticipant | None = None
+        self.shutdown = asyncio.Event()
+        self._tasks: set[asyncio.Task] = set()
 
-    async def echo_transcript(transcript: str):
+        session.on("user_input_transcribed", self._on_transcript)
+        session.on("error", self._on_error)
+        session.on("agent_state_changed", self._on_agent_state_changed)
+        session.on("user_state_changed", self._on_user_state_changed)
+
+    def _spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
+    async def _publish_debug(self, event: str, **details):
+        payload = {
+            "event": event,
+            "timestamp": time.time(),
+            "details": {key: str(value) for key, value in details.items()},
+        }
+        try:
+            await self.ctx.room.local_participant.publish_data(
+                json.dumps(payload).encode(),
+                reliable=True,
+                topic="agent-debug",
+            )
+        except Exception:
+            logger.exception("failed to publish debug event %s", event)
+
+    async def _publish_transcript(self, transcript: str):
+        participant = self.participant
         if participant is None:
             return
 
-        async def publish_echo():
-            await ctx.room.local_participant.publish_data(
-                f"Echo: {transcript}".encode(),
+        payload = {
+            "participant": participant.identity,
+            "text": transcript,
+            "timestamp": time.time(),
+        }
+        try:
+            await self.ctx.room.local_participant.publish_data(
+                json.dumps(payload).encode(),
                 reliable=True,
-                destination_identities=[participant.identity],
-                topic="stt-echo",
+                topic="stt-transcript",
             )
+        except Exception:
+            logger.exception("failed to publish transcript")
 
-        async def speak_echo():
-            logging.info("Speaking: %s", transcript)
-            speech = session.say(
-                f"{transcript}",
-                allow_interruptions=False,
-                add_to_chat_ctx=False,
-            )
-            await speech
-            logging.info("Done speaking")
+    async def _handle_transcript(self, transcript: str):
+        logger.info("realtime transcript: %s", transcript)
+        await self._publish_transcript(transcript)
+        await self._publish_debug("transcript_received", characters=len(transcript))
 
-        results = await asyncio.gather(
-            publish_echo(),
-            speak_echo(),
-            return_exceptions=True,
-        )
-        for name, result in zip(("publish", "speak"), results):
-            if isinstance(result, Exception):
-                logging.error("Failed to %s transcript echo: %s", name, result, exc_info=result)
-
-    @session.on("user_input_transcribed")
-    def on_transcript(event):
-        logging.info(
-            "Transcription event final=%s speaker=%s text=%r",
-            event.is_final,
-            event.speaker_id,
-            event.transcript,
-        )
+    def _on_transcript(self, event):
+        logger.info("transcription final=%s text=%r", event.is_final, event.transcript)
         if event.is_final and event.transcript.strip():
-            asyncio.create_task(echo_transcript(event.transcript))
+            self._spawn(self._handle_transcript(event.transcript))
 
-    @session.on("error")
-    def on_error(event):
-        logging.error("Session error: %s", event)
+    def _on_error(self, event):
+        logger.error("session error: %s", event)
+        self._spawn(
+            self._publish_debug(
+                "session_error",
+                source=type(event.source).__name__,
+                error=event.error,
+            )
+        )
 
-    logging.info("Starting session")
-    await session.start(
-        room=ctx.room,
-        agent=Agent(instructions="Transcribe the user's speech."),
-        room_options=room_io.RoomOptions(
-            audio_input=True,
-            audio_output=True,
-            text_output=False,
-            text_input=False,
+    def _on_agent_state_changed(self, event):
+        self._spawn(self._publish_debug("agent_state_changed", state=event.new_state))
+
+    def _on_user_state_changed(self, event):
+        self._spawn(self._publish_debug("user_state_changed", state=event.new_state))
+
+    def _on_track_subscribed(self, track, publication, participant):
+        self._spawn(
+            self._publish_debug(
+                "track_subscribed",
+                participant=participant.identity,
+                kind=track.kind,
+                source=publication.source,
+            )
+        )
+
+    def _on_track_unsubscribed(self, track, publication, participant):
+        self._spawn(
+            self._publish_debug(
+                "track_unsubscribed",
+                participant=participant.identity,
+                kind=track.kind,
+                source=publication.source,
+            )
+        )
+
+    async def start(self):
+        await self.ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        self.participant = await self.ctx.wait_for_participant()
+        identity = self.participant.identity
+        logger.info("connected to participant %s", identity)
+        await self._publish_debug("participant_connected", participant=identity)
+
+        self.ctx.room.on("track_subscribed", self._on_track_subscribed)
+        self.ctx.room.on("track_unsubscribed", self._on_track_unsubscribed)
+        self.ctx.room.on(
+            "active_speakers_changed",
+            lambda speakers: self._spawn(
+                self._publish_debug(
+                    "active_speakers_changed",
+                    participants=[speaker.identity for speaker in speakers],
+                )
+            ),
+        )
+        self.ctx.room.on(
+            "connection_state_changed",
+            lambda state: self._spawn(self._publish_debug("connection_state_changed", state=state)),
+        )
+        self.ctx.room.on("participant_disconnected", lambda *_: self.shutdown.set())
+        self.ctx.room.on("disconnected", lambda *_: self.shutdown.set())
+
+        await self._publish_debug("realtime_session_starting", participant=identity)
+        try:
+            await self._agent_session.start(
+                room=self.ctx.room,
+                agent=self,
+                room_options=room_io.RoomOptions(
+                    participant_identity=identity,
+                    close_on_disconnect=False,
+                    audio_input=True,
+                    audio_output=room_io.AudioOutputOptions(track_name="agent_audio"),
+                    text_output=False,
+                    text_input=False,
+                ),
+            )
+        except Exception as error:
+            logger.exception("failed to start realtime session")
+            await self._publish_debug("realtime_session_error", error=error)
+            raise
+
+        await self._publish_debug("room_ready", room=self.ctx.room.name, participant=identity)
+        await self.shutdown.wait()
+
+    async def on_enter(self):
+        await self._agent_session.generate_reply(
+            instructions="Greet the participant briefly and say you are ready to echo them."
+        )
+
+    async def close(self):
+        self.shutdown.set()
+        for task in list(self._tasks):
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+        await self._agent_session.aclose()
+
+
+def new_session() -> AgentSession:
+    return AgentSession(
+        llm=openai.realtime.RealtimeModel(
+            model="gpt-realtime",
+            voice="marin",
+            input_audio_transcription=realtime.AudioTranscription(
+                model="gpt-4o-transcribe",
+            ),
+            turn_detection=realtime.realtime_audio_input_turn_detection.SemanticVad(
+                type="semantic_vad",
+                eagerness="medium",
+                create_response=True,
+                interrupt_response=True,
+            ),
         ),
     )
-    await ctx.connect()
 
-    participant = await ctx.wait_for_participant()
-    logging.info("Connected to participant %s", participant.identity)
-    ctx.room.on("disconnected", lambda *_: shutdown.set())
 
-    logging.info("Publishing and speaking greeting")
-    await ctx.room.local_participant.publish_data(
-        b"Hello from the LiveKit agent!",
-        reliable=True,
-        destination_identities=[participant.identity],
-        topic="agent-greeting",
-    )
-    await session.say(
-        "Hello, I am ready. Say something and I will echo it.",
-        allow_interruptions=False,
-        add_to_chat_ctx=False,
-    )
-
-    await shutdown.wait()
-    logging.info("Disconnecting")
-    await session.aclose()
-
+async def entrypoint(ctx: JobContext):
+    agent = RoomAgent(ctx=ctx, session=new_session())
+    try:
+        await agent.start()
+    finally:
+        await agent.close()
 
 
 if __name__ == "__main__":

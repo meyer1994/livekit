@@ -6,8 +6,8 @@ Docker Compose. The agent's dependencies are managed with `uv` and pinned in
 
 ## Start it
 
-The agent uses OpenAI Whisper-compatible STT for this first test, so provide an
-OpenAI API key before starting:
+The agent uses OpenAI's Realtime API, so provide an OpenAI API key before
+starting:
 
 ```bash
 export OPENAI_API_KEY=your-openai-api-key
@@ -27,19 +27,17 @@ LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
 ```
 
-The agent registers with LiveKit and waits for a room job. When a participant
-joins its room, it sends one reliable data message:
+The agent registers with LiveKit and waits for a room job. Each connection
+uses its own room and one thin `RoomAgent` abstraction with one `AgentSession`.
+The agent uses OpenAI's `gpt-realtime` model with the `marin` voice for unified
+low-latency audio input, transcription, and spoken replies. Final user
+transcriptions appear in the browser's separate transcription log.
 
-```text
-Hello from the LiveKit agent!
-```
-
-It also transcribes microphone audio with OpenAI STT and speaks the response
-back with OpenAI TTS. Each final transcript is sent as a reliable data message
-prefixed with `Echo:` and spoken aloud. The agent uses Silero VAD with a longer
-silence window and prefix padding to avoid false starts, lost first syllables,
-and cutting off speech. The browser never plays its local microphone track back
-through the speakers.
+Connection, track, audio, and agent events appear in the debug log. The backend
+emits these events on the `agent-debug` topic, including participant, track,
+connection-state, active speaker, agent-state, user-state, reply, and error
+events. The browser never plays its local microphone track back through the
+speakers.
 
 Follow the agent logs with:
 
@@ -70,8 +68,9 @@ lk token create \
 ```
 
 Paste the resulting token into the page and connect to `ws://localhost:7880`.
-Enable the microphone or camera after connecting. The agent sends a greeting as
-LiveKit data, which appears in the page log.
+Use a unique room and token for each connection. Enable the microphone or
+camera after connecting. The agent sends a greeting as LiveKit data, which
+appears in the page log.
 
 The official LiveKit UI components are React-based, so this page uses the
 official browser client directly and provides its own plain HTML controls.
