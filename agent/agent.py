@@ -187,7 +187,7 @@ class RoomAgent(Agent):
 def new_session() -> AgentSession:
     return AgentSession(
         llm=openai.realtime.RealtimeModel(
-            model="gpt-realtime",
+            model="gpt-realtime-2.1-mini",
             voice="marin",
             input_audio_transcription=realtime.AudioTranscription(
                 model="gpt-4o-transcribe",
