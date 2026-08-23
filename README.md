@@ -77,6 +77,41 @@ official browser client directly and provides its own plain HTML controls.
 Never expose an API secret in a production frontend; generate tokens from a
 backend instead.
 
+## Networking
+
+The browser page is static and can be hosted by GitHub Pages. It connects to
+LiveKit for signaling over the public `wss://` domain. The agent uses Railway's
+private network to connect to LiveKit, while its OpenAI Realtime connection is
+outbound to OpenAI.
+
+```mermaid
+flowchart LR
+    Browser[Browser<br/>GitHub Pages index.html]
+    LiveKit[LiveKit server<br/>Railway livekit-server]
+    Agent[Python voice agent<br/>Railway livekit service]
+    OpenAI[OpenAI Realtime API]
+    Token[Token generator<br/>LiveKit CLI or backend]
+
+    Token -. "signed token" .-> Browser
+    Browser -- "WSS signaling :443 → :7880" --> LiveKit
+    Browser -. "WebRTC media<br/>UDP/TCP media ports" .-> LiveKit
+    Agent -- "private WS<br/>livekit-server:7880" --> LiveKit
+    Agent -- "WSS Realtime API" --> OpenAI
+    LiveKit -- "agent audio and<br/>debug/transcript data" --> Browser
+```
+
+Port roles:
+
+- `7880`: LiveKit HTTP/WebSocket signaling. The Railway public domain targets
+  this port.
+- `7881`: LiveKit TCP media fallback, exposed through Railway's TCP proxy when
+  available.
+- `7882` or the configured UDP range: LiveKit WebRTC media. Railway's HTTP
+  domain does not provide public UDP, so TURN or another UDP-capable host may
+  be needed for reliable audio/video.
+- `8081`: the agent's internal health/metrics HTTP server; it is not the
+  browser's LiveKit URL.
+
 Stop everything with:
 
 ```bash
