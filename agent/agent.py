@@ -19,8 +19,8 @@ class RoomAgent(Agent):
     def __init__(self, *, ctx: JobContext, session: AgentSession):
         super().__init__(
             instructions=(
-                "Always respond in English. Transcribe and echo the participant's speech. "
-                "Never respond in another language."
+                "You are a helpful English voice assistant. Generate concise, natural spoken "
+                "replies to what the participant says. Never respond in another language."
             )
         )
         self.ctx = ctx
