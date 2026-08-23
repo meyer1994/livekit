@@ -14,6 +14,7 @@
       .track audio { width: 90%; }
       .track .name { position: absolute; bottom: 8px; left: 8px; }
       .log { max-height: 180px; overflow: auto; white-space: pre-wrap; }
+      #toast-container { z-index: 1000; }
     </style>
   </head>
   <body>
@@ -71,6 +72,8 @@
       </section>
     </main>
 
+    <div id="toast-container" class="toast toast-end toast-bottom p-4"></div>
+
     <!-- Official LiveKit browser client. The UI below is plain HTML/CSS/JS. -->
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <script>
@@ -93,6 +96,42 @@
       const microphoneButton = document.querySelector("#microphone");
       const cameraButton = document.querySelector("#camera");
       const enableAudioButton = document.querySelector("#enable-audio");
+      const toastContainer = document.querySelector("#toast-container");
+
+      function errorMessage(error) {
+        if (error instanceof Error) return `${error.name}: ${error.message}`;
+        if (typeof error === "string") return error;
+        if (error?.message) return `${error.name ? `${error.name}: ` : ""}${error.message}`;
+        try {
+          return JSON.stringify(error);
+        } catch {
+          return String(error);
+        }
+      }
+
+      function showToast(message, type = "error") {
+        const toast = document.createElement("div");
+        toast.className = `alert alert-${type} max-w-sm shadow-lg`;
+        toast.role = "alert";
+        const text = document.createElement("span");
+        text.textContent = message;
+        const close = document.createElement("button");
+        close.className = "btn btn-ghost btn-xs";
+        close.type = "button";
+        close.textContent = "✕";
+        close.addEventListener("click", () => toast.remove());
+        toast.append(text, close);
+        toastContainer.append(toast);
+        window.setTimeout(() => toast.remove(), 10000);
+      }
+
+      window.addEventListener("error", (event) => {
+        showToast(`Browser error: ${event.message}`);
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        showToast(`Unhandled error: ${errorMessage(event.reason)}`);
+      });
 
       function appendLog(output, message) {
         const line = document.createElement("div");
@@ -201,10 +240,17 @@
           if (blocked) log("Browser blocked audio playback; click Enable audio");
         });
 
-        room.on(RoomEvent.Disconnected, () => {
+        room.on(RoomEvent.ConnectionStateChanged, (state) => {
+          log(`Connection state: ${state}`);
+          if (state === "failed") showToast("LiveKit connection failed");
+        });
+
+        room.on(RoomEvent.Disconnected, (reason) => {
           setConnected(false);
           enableAudioButton.classList.add("hidden");
-          log("Disconnected from LiveKit");
+          const details = reason ? ` (${reason})` : "";
+          log(`Disconnected from LiveKit${details}`);
+          showToast(`Disconnected from LiveKit${details}`, "warning");
         });
       }
 
@@ -226,7 +272,9 @@
           try {
             await room.startAudio();
           } catch (error) {
-            log(`Audio playback needs permission: ${error.message}`);
+            const message = errorMessage(error);
+            log(`Audio playback needs permission: ${message}`);
+            showToast(`Audio playback needs permission: ${message}`, "warning");
           }
           roomLabel.textContent = room.name;
           setConnected(true);
@@ -235,7 +283,9 @@
           room?.disconnect();
           room = null;
           setConnected(false);
-          log(`Connection failed: ${error.message}`);
+          const message = errorMessage(error);
+          log(`Connection failed: ${message}`);
+          showToast(`Connection failed: ${message}`);
         }
       });
 
@@ -257,7 +307,9 @@
           enableAudioButton.classList.add("hidden");
           log("Audio playback enabled");
         } catch (error) {
-          log(`Audio playback error: ${error.message}`);
+          const message = errorMessage(error);
+          log(`Audio playback error: ${message}`);
+          showToast(`Audio playback error: ${message}`);
         }
       });
 
@@ -270,7 +322,9 @@
           microphoneButton.textContent = enabled ? "Disable microphone" : "Enable microphone";
           log(enabled ? "Microphone enabled" : "Microphone disabled");
         } catch (error) {
-          log(`Microphone error: ${error.message}`);
+          const message = errorMessage(error);
+          log(`Microphone error: ${message}`);
+          showToast(`Microphone error: ${message}`);
         }
       });
 
@@ -282,7 +336,9 @@
           cameraEnabled = enabled;
           cameraButton.textContent = enabled ? "Disable camera" : "Enable camera";
         } catch (error) {
-          log(`Camera error: ${error.message}`);
+          const message = errorMessage(error);
+          log(`Camera error: ${message}`);
+          showToast(`Camera error: ${message}`);
         }
       });
     </script>
