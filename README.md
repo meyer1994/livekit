@@ -6,7 +6,11 @@ Docker Compose. The agent's dependencies are managed with `uv` and pinned in
 
 ## Start it
 
+The agent uses OpenAI Whisper-compatible STT for this first test, so provide an
+OpenAI API key before starting:
+
 ```bash
+export OPENAI_API_KEY=your-openai-api-key
 docker compose up --build
 ```
 
@@ -30,6 +34,11 @@ joins its room, it sends one reliable data message:
 Hello from the LiveKit agent!
 ```
 
+It also transcribes microphone audio with OpenAI STT. Each final transcript is
+sent back as a reliable data message prefixed with `Echo:`. The agent uses
+Silero VAD with a slightly higher activation threshold and a longer silence
+window to avoid false starts and cutting off speech.
+
 Follow the agent logs with:
 
 ```bash
@@ -38,8 +47,8 @@ docker compose logs -f agent
 
 ## Use the browser client
 
-`index.html` uses the official `livekit-client` browser library and a small
-vanilla HTML UI. Serve the directory locally, for example:
+`index.html` uses the official `livekit-client` browser library, daisyUI, and
+Tailwind's browser build. Serve the directory locally, for example:
 
 ```bash
 npx serve .
