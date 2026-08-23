@@ -78,6 +78,19 @@ class RoomAgent(Agent):
         logger.info("realtime transcript: %s", transcript)
         await self._publish_transcript(transcript)
         await self._publish_debug("transcript_received", characters=len(transcript))
+        await self._generate_response()
+
+    async def _generate_response(self):
+        try:
+            await self._publish_debug("llm_response_requested")
+            await self._agent_session.generate_reply(
+                instructions="Answer the participant's latest message briefly in English.",
+                input_modality="audio",
+            )
+            await self._publish_debug("llm_response_completed")
+        except Exception as error:
+            logger.exception("failed to generate response")
+            await self._publish_debug("llm_response_error", error=error)
 
     def _on_transcript(self, event):
         logger.info("transcription final=%s text=%r", event.is_final, event.transcript)
@@ -201,7 +214,7 @@ def new_session() -> AgentSession:
             turn_detection=realtime.realtime_audio_input_turn_detection.SemanticVad(
                 type="semantic_vad",
                 eagerness="medium",
-                create_response=True,
+                create_response=False,
                 interrupt_response=True,
             ),
         ),
