@@ -8,6 +8,6 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked
 
-COPY agent.py ./agent.py
+COPY *.py ./
 
 CMD ["uv", "run", "--locked", "--no-sync", "python", "agent.py", "start"]

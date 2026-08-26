@@ -13,6 +13,8 @@ services:
     ports:
       - "6006:6006"  # UI and OTLP HTTP collector
       - "4317:4317"  # OTLP gRPC collector
+    volumes:
+      - phoenix-data:/root/.phoenix
 
   agent:
     build:
@@ -24,13 +26,11 @@ services:
       LIVEKIT_API_KEY: devkey
       LIVEKIT_API_SECRET: secret
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY before starting the agent}
-
-      COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
-      PROD_CORS_ORIGIN: http://localhost:3000
-      # Set INSTRUMENT_LLAMA_INDEX: false to disable instrumentation
-      INSTRUMENT_LLAMA_INDEX: false
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+      PHOENIX_PROJECT_NAME: livekit-agent
     depends_on:
       - livekit
+      - phoenix
 
   app:
     build:
@@ -43,3 +43,6 @@ services:
       - 3000:3000
     depends_on:
       - agent
+
+volumes:
+  phoenix-data:

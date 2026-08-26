@@ -38,6 +38,18 @@ Follow the agent logs with:
 docker compose logs -f agent
 ```
 
+The agent registers a Phoenix OpenTelemetry provider and exports LiveKit's
+built-in traces to the local collector over OTLP/HTTP. Open
+`http://localhost:6006` to inspect session, turn, STT, LLM, and TTS spans,
+including transcripts, latency, token usage, and audio duration. When a session
+closes, the agent also adds a `voice.session.audio` span containing the captured
+input and output as inline WAV data URIs. Traces use the `livekit-agent` project,
+are grouped by room name, and persist in the `phoenix-data` Docker volume.
+
+Raw voice audio is sensitive. This local setup includes it only for development.
+`OPENINFERENCE_BASE64_AUDIO_MAX_LENGTH` controls the maximum encoded size per
+input/output recording and defaults to 2,000,000 characters.
+
 ## Use the browser client
 
 `index.html` uses the official `livekit-client` browser library, daisyUI, and
