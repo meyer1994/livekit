@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterable
 from contextvars import ContextVar
+import os
 
 from livekit import agents
 from livekit.agents import telemetry
@@ -12,7 +13,7 @@ from opentelemetry.trace import Span
 
 
 provider = TracerProvider()
-exporter = OTLPSpanExporter(endpoint='http://phoenix:6006/v1/traces')
+exporter = OTLPSpanExporter()
 processor = BatchSpanProcessor(exporter)
 provider.add_span_processor(processor)
 telemetry.set_tracer_provider(provider)
@@ -32,6 +33,7 @@ server = agents.AgentServer()
 
 @server.rtc_session()
 async def entrypoint(ctx: agents.JobContext) -> None:
+
     session = AgentSession(
         stt=openai.STT(model="gpt-4o-mini-transcribe", use_realtime=True),
         llm=openai.LLM(model="gpt-4.1-mini"),

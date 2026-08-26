@@ -13,8 +13,6 @@ services:
     ports:
       - "6006:6006"  # UI and OTLP HTTP collector
       - "4317:4317"  # OTLP gRPC collector
-    volumes:
-      - phoenix-data:/root/.phoenix
 
   agent:
     build:
@@ -26,8 +24,11 @@ services:
       LIVEKIT_API_KEY: devkey
       LIVEKIT_API_SECRET: secret
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY before starting the agent}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:6006/v1/traces
-      OTEL_SERVICE_NAME: default
+      # The agent uses the OTLP/HTTP exporter, so use Phoenix's HTTP port.
+      # OTEL_EXPORTER_OTLP_ENDPOINT gets /v1/traces appended automatically.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://phoenix:6006
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: livekit-agent
     depends_on:
       - livekit
       - phoenix
@@ -43,6 +44,3 @@ services:
       - 3000:3000
     depends_on:
       - agent
-
-volumes:
-  phoenix-data:
