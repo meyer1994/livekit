@@ -1,16 +1,18 @@
 from collections.abc import AsyncIterable
+from contextvars import ContextVar
 
 from livekit import agents
 from livekit.agents import telemetry
 from livekit.agents import Agent, AgentSession
 from livekit.plugins import openai
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import TracerProvider, SpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.trace import Span
 
 
 provider = TracerProvider()
-exporter = OTLPSpanExporter(endpoint="http://phoenix:6006/v1/traces")
+exporter = OTLPSpanExporter(endpoint='http://phoenix:6006/v1/traces')
 processor = BatchSpanProcessor(exporter)
 provider.add_span_processor(processor)
 telemetry.set_tracer_provider(provider)
@@ -37,7 +39,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     await session.start(room=ctx.room, agent=Assistant())
-    await session.generate_reply(instructions="Greet the user cheerfully.")
+    await session.generate_reply(instructions="Greet the user cheerfully.", allow_interruptions=False)
 
 
 if __name__ == "__main__":

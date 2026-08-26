@@ -15,7 +15,7 @@ useSeoMeta({
 const config = useRuntimeConfig()
 const toast = useToast()
 
-const roomName = ref('demo-room')
+const roomName = ref(`room-${crypto.randomUUID().slice(0, 8)}`)
 const status = ref<'disconnected' | 'connecting' | 'connected' | 'disconnecting'>('disconnected')
 const microphoneEnabled = ref(false)
 const audioBlocked = ref(false)
