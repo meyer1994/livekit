@@ -27,17 +27,10 @@ LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
 ```
 
-The agent registers with LiveKit and waits for a room job. Each connection
-uses its own room and one thin `RoomAgent` abstraction with one `AgentSession`.
-The agent uses OpenAI's `gpt-realtime` model with the `marin` voice for unified
-low-latency audio input, transcription, and spoken replies. Final user
-transcriptions appear in the browser's separate transcription log.
-
-Connection, track, audio, and agent events appear in the debug log. The backend
-emits these events on the `agent-debug` topic, including participant, track,
-connection-state, active speaker, agent-state, user-state, reply, and error
-events. The browser never plays its local microphone track back through the
-speakers.
+The agent registers with LiveKit and waits for a room job. Each connection uses
+a simple `AgentSession` with OpenAI's `gpt-4o-mini-transcribe` for speech-to-text,
+`gpt-4.1-mini` for replies, and `gpt-4o-mini-tts` with the `marin` voice for
+speech output. The assistant is helpful, cheerful, and concise.
 
 Follow the agent logs with:
 
@@ -69,8 +62,8 @@ lk token create \
 
 Paste the resulting token into the page and connect to `ws://localhost:7880`.
 Use a unique room and token for each connection. Enable the microphone or
-camera after connecting. The agent sends a greeting as LiveKit data, which
-appears in the page log.
+camera after connecting. The agent greets the participant and asks how it can
+help.
 
 The official LiveKit UI components are React-based, so this page uses the
 official browser client directly and provides its own plain HTML controls.
@@ -97,7 +90,7 @@ flowchart LR
     Browser -. "WebRTC media<br/>UDP/TCP media ports" .-> LiveKit
     Agent -- "private WS<br/>livekit-server:7880" --> LiveKit
     Agent -- "WSS Realtime API" --> OpenAI
-    LiveKit -- "agent audio and<br/>debug/transcript data" --> Browser
+    LiveKit -- "agent audio" --> Browser
 ```
 
 Port roles:
