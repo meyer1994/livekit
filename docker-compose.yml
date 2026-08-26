@@ -12,7 +12,7 @@ services:
     build:
       context: ./agent
     env_file:
-      - .env
+      - ./agent/.env
     environment:
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: devkey
