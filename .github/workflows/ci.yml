@@ -1,0 +1,41 @@
+name: ci
+
+on: push
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        working-directory: app
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node: [22]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+
+      - name: Install node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck

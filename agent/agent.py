@@ -208,7 +208,7 @@ def new_session() -> AgentSession:
             model="gpt-realtime-2.1-mini",
             voice="marin",
             input_audio_transcription=realtime.AudioTranscription(
-                model="gpt-4o-transcribe",
+                model="gpt-4o-mini-transcribe",
                 language="en",
             ),
             turn_detection=realtime.realtime_audio_input_turn_detection.SemanticVad(

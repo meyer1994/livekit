@@ -10,7 +10,9 @@ services:
 
   agent:
     build:
-      context: .
+      context: ./agent
+    env_file:
+      - .env
     environment:
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: devkey
@@ -18,4 +20,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY before starting the agent}
     depends_on:
       - livekit
-    restart: unless-stopped
+
+  app:
+    build:
+      context: ./app
+    environment:
+      NUXT_LIVEKIT_API_KEY: devkey
+      NUXT_LIVEKIT_API_SECRET: secret
+      NUXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+    ports:
+      - 3000:3000
+    depends_on:
+      - agent

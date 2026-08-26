@@ -1,8 +1,0 @@
-.git
-.gitignore
-.env
-.vscode
-.venv
-agent/.venv
-**/__pycache__
-*.py[cod]
