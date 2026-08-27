@@ -45,9 +45,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # set the tracer provider for the session
     telemetry.set_tracer_provider(
         tracer_provider=provider,
-        metadata={
-            "session.id": ctx.room.name or 'unknown' + '_' + dt.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+        metadata={"session.id": ctx.room.name or 'NONE'}
     )
 
     await session.start(room=ctx.room, agent=Assistant())
