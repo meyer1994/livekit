@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import type { Room as LiveKitRoom } from 'livekit-client'
+import type { TranscriptionSegment } from 'livekit-client'
 
 useHead({
   htmlAttrs: { lang: 'en' },
-  meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
   link: [{ rel: 'icon', href: '/favicon.ico' }]
 })
 
@@ -12,373 +11,457 @@ useSeoMeta({
   description: 'Start a voice conversation with the LiveKit agent.'
 })
 
-const config = useRuntimeConfig()
-const toast = useToast()
+const roomName = ref(`room`)
+onMounted(() => roomName.value = randomRoomName())
 
-const roomName = ref(`room-${crypto.randomUUID().slice(0, 8)}`)
-const status = ref<'disconnected' | 'connecting' | 'connected' | 'disconnecting'>('disconnected')
-const microphoneEnabled = ref(false)
-const audioBlocked = ref(false)
-const agentSpeaking = ref(false)
-const errorMessage = ref('')
-const audioHost = ref<HTMLDivElement | null>(null)
-const transcripts = ref<Array<{ id: string, participant: string, text: string }>>([])
-
-let activeRoom: LiveKitRoom | null = null
-
-const isBusy = computed(() => status.value === 'connecting' || status.value === 'disconnecting')
-const isConnected = computed(() => status.value === 'connected')
-const statusLabel = computed(() => ({
-  disconnected: 'Disconnected',
-  connecting: 'Connecting',
-  connected: 'Live',
-  disconnecting: 'Disconnecting'
-})[status.value])
-const statusColor = computed<'neutral' | 'warning' | 'success'>(() => {
-  if (status.value === 'connected') return 'success'
-  if (isBusy.value) return 'warning'
-  return 'neutral'
-})
-
-function describeError(error: unknown) {
-  if (error instanceof Error) return error.message
-
-  if (error && typeof error === 'object') {
-    const fetchError = error as {
-      data?: { message?: string, statusMessage?: string }
-      message?: string
-    }
-    return fetchError.data?.statusMessage || fetchError.data?.message || fetchError.message || 'Something went wrong'
-  }
-
-  return 'Something went wrong'
+function randomRoomName() {
+  return `room-${crypto.randomUUID().slice(0, 8)}`
 }
 
-function clearSessionState() {
-  microphoneEnabled.value = false
-  audioBlocked.value = false
-  agentSpeaking.value = false
-  audioHost.value?.replaceChildren()
+type LogEntry = {
+  id: number
+  name: string
+  payload: string
+  time: string
 }
 
-async function startSession() {
-  const requestedRoom = roomName.value.trim()
-  if (!requestedRoom || isBusy.value || isConnected.value) return
+type ConversationEntry = LogEntry & {
+  text: string
+}
 
-  status.value = 'connecting'
-  errorMessage.value = ''
-  transcripts.value = []
+const events = ref<LogEntry[]>([])
+const transcriptions = ref<ConversationEntry[]>([])
+const messages = ref<ConversationEntry[]>([])
+let entryId = 0
 
-  let voiceRoom: LiveKitRoom | null = null
-
+function formatPayload(value: unknown): string {
   try {
-    const [{ token }, livekit] = await Promise.all([
-      $fetch<{ token: string }>('/api/room', {
-        method: 'POST',
-        body: { roomName: requestedRoom }
-      }),
-      import('livekit-client')
-    ])
-
-    voiceRoom = new livekit.Room({
-      adaptiveStream: true,
-      dynacast: true,
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: false,
-        channelCount: 1
-      }
-    })
-    activeRoom = voiceRoom
-
-    voiceRoom.on(livekit.RoomEvent.TrackSubscribed, (track) => {
-      if (track.kind !== livekit.Track.Kind.Audio) return
-
-      const element = track.attach()
-      element.autoplay = true
-      audioHost.value?.appendChild(element)
-    })
-
-    voiceRoom.on(livekit.RoomEvent.TrackUnsubscribed, (track) => {
-      track.detach().forEach(element => element.remove())
-    })
-
-    voiceRoom.on(livekit.RoomEvent.AudioPlaybackStatusChanged, () => {
-      audioBlocked.value = !voiceRoom?.canPlaybackAudio
-    })
-
-    voiceRoom.on(livekit.RoomEvent.ActiveSpeakersChanged, (speakers) => {
-      agentSpeaking.value = speakers.some(participant => participant.identity !== voiceRoom?.localParticipant.identity)
-    })
-
-    voiceRoom.on(livekit.RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
-      if (topic !== 'stt-transcript') return
-
-      try {
-        const data = JSON.parse(new TextDecoder().decode(payload)) as {
-          participant?: unknown
-          text?: unknown
-        }
-        if (typeof data.text !== 'string') return
-
-        transcripts.value.push({
-          id: crypto.randomUUID(),
-          participant: typeof data.participant === 'string' ? data.participant : participant?.identity || 'You',
-          text: data.text
-        })
-        transcripts.value = transcripts.value.slice(-20)
-      } catch {
-        // Ignore malformed data messages from other room participants.
-      }
-    })
-
-    voiceRoom.on(livekit.RoomEvent.Disconnected, () => {
-      if (activeRoom !== voiceRoom) return
-      activeRoom = null
-      status.value = 'disconnected'
-      clearSessionState()
-    })
-
-    await voiceRoom.connect(config.public.livekitUrl, token, { autoSubscribe: true })
-    await voiceRoom.localParticipant.setMicrophoneEnabled(true)
-    microphoneEnabled.value = true
-
-    try {
-      await voiceRoom.startAudio()
-    } catch {
-      audioBlocked.value = true
+    if (value instanceof Uint8Array) {
+      return new TextDecoder().decode(value)
     }
 
-    status.value = 'connected'
-    toast.add({
-      title: 'Voice session started',
-      description: `Connected to ${requestedRoom}`,
-      color: 'success'
+    const result = JSON.stringify(value, (_key, nestedValue) => {
+      if (nestedValue instanceof Uint8Array) {
+        return `[Uint8Array: ${nestedValue.byteLength} bytes]`
+      }
+      if (typeof nestedValue === 'bigint') {
+        return nestedValue.toString()
+      }
+      return nestedValue
+    }, 2)
+
+    return result === undefined ? String(value) : result
+  } catch {
+    return String(value)
+  }
+}
+
+function readableText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value instanceof Uint8Array) return new TextDecoder().decode(value)
+  if (Array.isArray(value)) return value.map(readableText).filter(Boolean).join(' ')
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    for (const key of ['text', 'message', 'content', 'transcript', 'transcription']) {
+      if (record[key] !== undefined) {
+        const text = readableText(record[key])
+        if (text) return text
+      }
+    }
+  }
+
+  return formatPayload(value)
+}
+
+function recordEvent(name: string, payload: unknown) {
+  events.value.push({
+    id: ++entryId,
+    name,
+    payload: formatPayload(payload),
+    time: new Date().toLocaleTimeString()
+  })
+}
+
+function recordTranscription(transcripts: TranscriptionSegment[]) {
+  transcripts
+    .filter(transcript => transcript.final)
+    .forEach(transcript => {
+      const entry = {
+        id: ++entryId,
+        text: readableText(transcript.text),
+        name: 'transcription-received',
+        payload: formatPayload(transcript),
+        time: new Date().toLocaleTimeString()
+      }
+      transcriptions.value.push(entry)
+      events.value.push({ ...entry })
     })
-  } catch (error) {
-    if (voiceRoom) await voiceRoom.disconnect()
-    if (activeRoom === voiceRoom) activeRoom = null
-    status.value = 'disconnected'
-    clearSessionState()
-    errorMessage.value = describeError(error)
-  }
+
+  transcripts.forEach(transcript => recordEvent('transcription-received', transcript))
 }
 
-async function disconnect() {
-  if (!activeRoom || isBusy.value) return
-
-  status.value = 'disconnecting'
-  const roomToClose = activeRoom
-  activeRoom = null
-
-  try {
-    await roomToClose.disconnect()
-  } finally {
-    status.value = 'disconnected'
-    clearSessionState()
+function recordMessage(payload: unknown) {
+  const entry = {
+    id: ++entryId,
+    text: readableText(payload),
+    name: 'chat-message',
+    payload: formatPayload(payload),
+    time: new Date().toLocaleTimeString()
   }
+  messages.value.push(entry)
+  events.value.push({ ...entry })
 }
 
-async function toggleMicrophone() {
-  if (!activeRoom) return
-
-  try {
-    const enabled = !microphoneEnabled.value
-    await activeRoom.localParticipant.setMicrophoneEnabled(enabled)
-    microphoneEnabled.value = enabled
-  } catch (error) {
-    toast.add({
-      title: 'Microphone error',
-      description: describeError(error),
-      color: 'error'
-    })
-  }
+function endChat(disconnect: () => void) {
+  disconnect()
+  tokenClear()
+  events.value = []
+  transcriptions.value = []
+  messages.value = []
 }
 
-async function enableAudio() {
-  if (!activeRoom) return
-
-  try {
-    await activeRoom.startAudio()
-    audioBlocked.value = false
-  } catch (error) {
-    toast.add({
-      title: 'Audio playback error',
-      description: describeError(error),
-      color: 'error'
-    })
-  }
-}
-
-onBeforeUnmount(() => {
-  activeRoom?.disconnect()
-  activeRoom = null
-})
+const {
+  data: tokenData,
+  error: tokenError,
+  status: tokenStatus,
+  execute: tokenExecute,
+  clear: tokenClear
+} = useAsyncData('token', () => {
+  return $fetch('/api/room', {
+    method: 'POST',
+    body: { roomName: roomName.value.trim() }
+  })
+}, { immediate: false, server: false })
 </script>
 
 <template>
   <UApp>
-    <header class="border-b border-default">
-      <UContainer class="flex h-16 items-center justify-between">
-        <div class="flex items-center gap-2 font-semibold">
-          <UIcon
-            name="i-lucide-audio-waveform"
-            class="size-5 text-primary"
-          />
-          LiveKit Voice
-        </div>
-        <UColorModeButton />
-      </UContainer>
-    </header>
-
-    <UMain>
-      <UContainer class="flex min-h-[calc(100vh-4rem)] items-center justify-center py-12">
-        <UCard class="w-full max-w-xl">
-          <template #header>
-            <div class="flex items-start justify-between gap-4">
-              <div>
-                <h1 class="text-2xl font-semibold text-highlighted">
-                  Talk to the voice agent
-                </h1>
-                <p class="mt-1 text-sm text-muted">
-                  Enter a room name and allow microphone access to begin.
-                </p>
-              </div>
-              <UBadge
-                :color="statusColor"
-                variant="subtle"
-              >
-                {{ statusLabel }}
-              </UBadge>
-            </div>
-          </template>
+    <UMain class="min-h-screen">
+      <UContainer class="flex min-h-screen items-center justify-center py-6 sm:py-8">
+        <UCard
+          v-if="!tokenData?.token"
+          class="w-full max-w-lg"
+          :ui="{ body: 'flex flex-col gap-4' }"
+        >
+          <div class="text-center">
+            <UIcon
+              name="i-lucide-audio-waveform"
+              class="size-8 text-primary"
+            />
+            <h1 class="mt-3 text-2xl font-semibold text-highlighted">
+              LiveKit Voice
+            </h1>
+            <p class="mt-1 text-sm text-muted">
+              Talk to the voice agent.
+            </p>
+          </div>
 
           <form
-            v-if="!isConnected"
-            class="space-y-5"
-            @submit.prevent="startSession"
+            class="space-y-4"
+            @submit.prevent="tokenExecute"
           >
-            <UFormField
-              label="Room name"
-              name="roomName"
-              required
-            >
+            <UFieldGroup class="w-full">
               <UInput
                 v-model="roomName"
-                class="w-full"
+                class="flex-1"
                 size="xl"
                 icon="i-lucide-hash"
-                placeholder="demo-room"
+                placeholder="Room name"
                 autocomplete="off"
                 maxlength="128"
-                :disabled="isBusy"
+                autofocus
               />
-            </UFormField>
+              <UButton
+                type="button"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-dices"
+                aria-label="Generate a random room name"
+                @click="roomName = randomRoomName()"
+              />
+            </UFieldGroup>
 
             <UAlert
-              v-if="errorMessage"
+              v-if="tokenError"
               color="error"
               variant="subtle"
-              icon="i-lucide-circle-alert"
-              title="Could not start the session"
-              :description="errorMessage"
+              :description="tokenError.message"
             />
 
             <UButton
               type="submit"
               size="xl"
               block
-              icon="i-lucide-phone"
-              :loading="status === 'connecting'"
-              :disabled="!roomName.trim() || isBusy"
+              icon="i-lucide-plus"
+              :loading="tokenStatus === 'pending'"
+              :disabled="!roomName.trim()"
             >
-              Start voice session
+              Create room
             </UButton>
           </form>
-
-          <div
-            v-else
-            class="space-y-6"
-          >
-            <div class="flex flex-col items-center py-4 text-center">
-              <div
-                class="grid size-24 place-items-center rounded-full bg-primary/10 ring-8 ring-primary/5 transition-transform"
-                :class="agentSpeaking ? 'scale-110' : ''"
-              >
-                <UIcon
-                  :name="agentSpeaking ? 'i-lucide-audio-lines' : 'i-lucide-mic'"
-                  class="size-10 text-primary"
-                />
-              </div>
-              <p class="mt-5 text-lg font-medium text-highlighted">
-                {{ agentSpeaking ? 'Agent is speaking' : 'Listening…' }}
-              </p>
-              <p class="text-sm text-muted">
-                Room: {{ roomName.trim() }}
-              </p>
-            </div>
-
-            <UAlert
-              v-if="audioBlocked"
-              color="warning"
-              variant="subtle"
-              icon="i-lucide-volume-x"
-              title="Audio playback is blocked"
-              description="Your browser needs permission to play the agent's voice."
-              :actions="[{ label: 'Enable audio', onClick: enableAudio }]"
-            />
-
-            <div
-              v-if="transcripts.length"
-              class="space-y-2"
-            >
-              <p class="text-sm font-medium text-highlighted">
-                Recent transcription
-              </p>
-              <div class="max-h-40 space-y-2 overflow-y-auto rounded-lg bg-elevated p-3">
-                <p
-                  v-for="transcript in transcripts"
-                  :key="transcript.id"
-                  class="text-sm"
-                >
-                  <span class="font-medium text-highlighted">{{ transcript.participant }}:</span>
-                  <span class="text-muted"> {{ transcript.text }}</span>
-                </p>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-3">
-              <UButton
-                size="lg"
-                block
-                color="neutral"
-                variant="soft"
-                :icon="microphoneEnabled ? 'i-lucide-mic' : 'i-lucide-mic-off'"
-                @click="toggleMicrophone"
-              >
-                {{ microphoneEnabled ? 'Mute' : 'Unmute' }}
-              </UButton>
-              <UButton
-                size="lg"
-                block
-                color="error"
-                variant="soft"
-                icon="i-lucide-phone-off"
-                @click="disconnect"
-              >
-                End session
-              </UButton>
-            </div>
-          </div>
         </UCard>
+
+        <div
+          v-else
+          class="flex h-[calc(100vh-3rem)] min-h-0 w-full min-w-0 max-w-full flex-col gap-4 overflow-hidden sm:h-[calc(100vh-4rem)]"
+        >
+          <div class="flex items-center justify-between gap-4 px-1">
+            <div>
+              <p class="text-xs font-medium uppercase tracking-widest text-primary">
+                Live conversation
+              </p>
+              <h1 class="text-xl font-semibold text-highlighted">
+                {{ roomName }}
+              </h1>
+            </div>
+            <UBadge
+              color="success"
+              variant="subtle"
+              class="shrink-0"
+            >
+              <span class="size-1.5 rounded-full bg-success" />
+              Connected
+            </UBadge>
+          </div>
+
+          <VoiceRoom
+            v-slot="{ toggleMicrophone, disconnect, isMicrophoneEnabled, roomState, connectionState }"
+            :token="tokenData.token"
+            @connected="recordEvent('connected', $event)"
+            @reconnecting="recordEvent('reconnecting', $event)"
+            @signal-reconnecting="recordEvent('signal-reconnecting', $event)"
+            @reconnected="recordEvent('reconnected', $event)"
+            @disconnected="recordEvent('disconnected', $event)"
+            @connection-state-changed="recordEvent('connection-state-changed', $event)"
+            @moved="recordEvent('moved', $event)"
+            @media-devices-changed="recordEvent('media-devices-changed', $event)"
+            @participant-connected="recordEvent('participant-connected', $event)"
+            @participant-disconnected="recordEvent('participant-disconnected', $event)"
+            @track-published="recordEvent('track-published', $event)"
+            @track-subscribed="recordEvent('track-subscribed', $event)"
+            @track-subscription-failed="recordEvent('track-subscription-failed', $event)"
+            @track-unpublished="recordEvent('track-unpublished', $event)"
+            @track-unsubscribed="recordEvent('track-unsubscribed', $event)"
+            @track-muted="recordEvent('track-muted', $event)"
+            @track-unmuted="recordEvent('track-unmuted', $event)"
+            @local-track-published="recordEvent('local-track-published', $event)"
+            @local-track-unpublished="recordEvent('local-track-unpublished', $event)"
+            @local-audio-silence-detected="recordEvent('local-audio-silence-detected', $event)"
+            @active-speakers-changed="recordEvent('active-speakers-changed', $event)"
+            @participant-metadata-changed="recordEvent('participant-metadata-changed', $event)"
+            @participant-name-changed="recordEvent('participant-name-changed', $event)"
+            @participant-attributes-changed="recordEvent('participant-attributes-changed', $event)"
+            @participant-active="recordEvent('participant-active', $event)"
+            @room-metadata-changed="recordEvent('room-metadata-changed', $event)"
+            @data-received="recordEvent('data-received', $event)"
+            @sip-dtmf-received="recordEvent('sip-dtmf-received', $event)"
+            @transcription-received="recordTranscription"
+            @connection-quality-changed="recordEvent('connection-quality-changed', $event)"
+            @track-stream-state-changed="recordEvent('track-stream-state-changed', $event)"
+            @track-subscription-permission-changed="recordEvent('track-subscription-permission-changed', $event)"
+            @track-subscription-status-changed="recordEvent('track-subscription-status-changed', $event)"
+            @audio-playback-changed="recordEvent('audio-playback-changed', $event)"
+            @video-playback-changed="recordEvent('video-playback-changed', $event)"
+            @media-devices-error="recordEvent('media-devices-error', $event)"
+            @participant-permissions-changed="recordEvent('participant-permissions-changed', $event)"
+            @signal-connected="recordEvent('signal-connected', $event)"
+            @recording-status-changed="recordEvent('recording-status-changed', $event)"
+            @participant-encryption-status-changed="recordEvent('participant-encryption-status-changed', $event)"
+            @encryption-error="recordEvent('encryption-error', $event)"
+            @dc-buffer-status-changed="recordEvent('dc-buffer-status-changed', $event)"
+            @active-device-changed="recordEvent('active-device-changed', $event)"
+            @chat-message="recordMessage"
+            @local-track-subscribed="recordEvent('local-track-subscribed', $event)"
+            @metrics-received="recordEvent('metrics-received', $event)"
+            @data-track-published="recordEvent('data-track-published', $event)"
+            @data-track-unpublished="recordEvent('data-track-unpublished', $event)"
+            @local-data-track-published="recordEvent('local-data-track-published', $event)"
+            @local-data-track-unpublished="recordEvent('local-data-track-unpublished', $event)"
+          >
+            <UCard
+              class="min-h-0 flex-1 flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden"
+              :ui="{
+                body: 'flex min-h-0 flex-1 flex-col p-0 sm:p-0',
+                footer: 'border-t border-default p-4 sm:p-4'
+              }"
+            >
+              <div class="grid min-h-0 min-w-0 flex-1 lg:grid-cols-2">
+                <!-- events -->
+                <section class="flex min-h-0 min-w-0 max-w-full flex-col overflow-y-auto p-4 lg:border-r lg:border-default lg:p-6">
+                  <div class="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 class="font-semibold text-highlighted">
+                        Events
+                      </h2>
+                      <p class="text-sm text-muted">
+                        LiveKit room activity
+                      </p>
+                    </div>
+                    <UBadge
+                      color="neutral"
+                      variant="subtle"
+                    >
+                      {{ events.length }}
+                    </UBadge>
+                  </div>
+
+                  <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+                    <div
+                      v-if="!events.length"
+                      class="flex h-full min-h-32 items-center justify-center rounded-lg border border-dashed border-default p-6 text-center text-sm text-muted"
+                    >
+                      Waiting for room events...
+                    </div>
+                    <div
+                      v-else
+                      class="space-y-3"
+                    >
+                      <article
+                        v-for="event in events"
+                        :key="event.id"
+                        class="rounded-lg border border-default bg-elevated/30 p-3"
+                      >
+                        <div class="flex items-center justify-between gap-3">
+                          <span class="font-mono text-xs font-medium text-primary">
+                            {{ event.name }}
+                          </span>
+                          <time class="shrink-0 text-[11px] text-dimmed">
+                            {{ event.time }}
+                          </time>
+                        </div>
+                        <pre class="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted">{{ event.payload }}</pre>
+                      </article>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- conversation -->
+                <section class="grid min-h-0 min-w-0 max-w-full grid-rows-2 divide-y divide-default border-t border-default lg:border-t-0">
+                  <div class="flex min-h-0 flex-col p-4 lg:p-6">
+                    <div class="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h2 class="font-semibold text-highlighted">
+                          Transcriptions
+                        </h2>
+                        <p class="text-sm text-muted">
+                          Speech recognized from the room
+                        </p>
+                      </div>
+                      <UBadge
+                        color="neutral"
+                        variant="subtle"
+                      >
+                        {{ transcriptions.length }}
+                      </UBadge>
+                    </div>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+                      <div
+                        v-if="!transcriptions.length"
+                        class="flex h-full min-h-24 items-center justify-center rounded-lg border border-dashed border-default p-6 text-center text-sm text-muted"
+                      >
+                        Waiting for transcriptions...
+                      </div>
+                      <div
+                        v-else
+                        class="space-y-3"
+                      >
+                        <article
+                          v-for="transcription in transcriptions"
+                          :key="transcription.id"
+                          class="rounded-lg bg-primary/5 p-3"
+                        >
+                          <div class="flex items-center justify-between gap-3 text-[11px] text-dimmed">
+                            <span>{{ transcription.name }}</span>
+                            <time>{{ transcription.time }}</time>
+                          </div>
+                          <p class="mt-2 text-sm text-highlighted">
+                            {{ transcription.text }}
+                          </p>
+                        </article>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex min-h-0 flex-col p-4 lg:p-6">
+                    <div class="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h2 class="font-semibold text-highlighted">
+                          Messages received
+                        </h2>
+                        <p class="text-sm text-muted">
+                          Chat data from participants
+                        </p>
+                      </div>
+                      <UBadge
+                        color="neutral"
+                        variant="subtle"
+                      >
+                        {{ messages.length }}
+                      </UBadge>
+                    </div>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+                      <div
+                        v-if="!messages.length"
+                        class="flex h-full min-h-24 items-center justify-center rounded-lg border border-dashed border-default p-6 text-center text-sm text-muted"
+                      >
+                        No messages received.
+                      </div>
+                      <div
+                        v-else
+                        class="space-y-3"
+                      >
+                        <article
+                          v-for="message in messages"
+                          :key="message.id"
+                          class="rounded-lg bg-elevated/60 p-3"
+                        >
+                          <div class="flex items-center justify-between gap-3 text-[11px] text-dimmed">
+                            <span>{{ message.name }}</span>
+                            <time>{{ message.time }}</time>
+                          </div>
+                          <p class="mt-2 whitespace-pre-wrap break-words text-sm text-highlighted">
+                            {{ message.text }}
+                          </p>
+                        </article>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <template #footer>
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p class="text-sm text-muted">
+                    {{ roomState === 'connected' ? 'Room is ready' : '' }}
+                    {{ roomState === 'disconnected' ? 'Room is disconnected' : '' }}
+                    {{ roomState === 'reconnecting' ? 'Room is reconnecting' : '' }}
+                  </p>
+                  <div class="flex gap-2">
+                    <UButton
+                      color="neutral"
+                      variant="soft"
+                      icon="i-lucide-mic"
+                      :disabled="connectionState !== 'connected'"
+                      :label="isMicrophoneEnabled ? 'Mute' : 'Unmute'"
+                      @click="toggleMicrophone"
+                    />
+                    <UButton
+                      color="error"
+                      variant="soft"
+                      icon="i-lucide-phone-off"
+                      label="End"
+                      @click="endChat(disconnect)"
+                    />
+                  </div>
+                </div>
+              </template>
+            </UCard>
+          </VoiceRoom>
+        </div>
       </UContainer>
     </UMain>
-
-    <div
-      ref="audioHost"
-      class="sr-only"
-      aria-hidden="true"
-    />
   </UApp>
 </template>
