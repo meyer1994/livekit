@@ -2,7 +2,6 @@ import {
   defineRailway,
   github,
   image,
-  preserve,
   project,
   service,
 } from "railway/iac";
@@ -16,8 +15,14 @@ export default defineRailway(() => {
     // Railway supports TCP proxies, but not Docker Compose's UDP mapping.
     tcp: [7880, 7881],
     env: {
-      LIVEKIT_API_KEY: "devkey",
-      LIVEKIT_API_SECRET: "secret",
+      LIVEKIT_API_KEY: {
+        value: "devkey",
+        description: "livekit api key shared by the server, agent, and web client.",
+      },
+      LIVEKIT_API_SECRET: {
+        value: "secret",
+        description: "livekit api secret shared by the server, agent, and web client.",
+      },
     },
   });
 
@@ -30,24 +35,53 @@ export default defineRailway(() => {
   const agent = service("agent", {
     source: github(repository, { rootDirectory: "agent" }),
     env: {
-      LIVEKIT_URL: "ws://${{livekit.RAILWAY_PRIVATE_DOMAIN}}:7880",
-      LIVEKIT_API_KEY: "devkey",
-      LIVEKIT_API_SECRET: "secret",
-      OPENAI_API_KEY: preserve(),
-      OTEL_EXPORTER_OTLP_ENDPOINT:
-        "http://${{phoenix.RAILWAY_PRIVATE_DOMAIN}}:6006",
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
-      OTEL_SERVICE_NAME: "livekit-agent",
+      LIVEKIT_URL: {
+        value: "ws://${{livekit.RAILWAY_PRIVATE_DOMAIN}}:7880",
+        description: "private websocket URL used by the agent to reach the livekit server.",
+      },
+      LIVEKIT_API_KEY: {
+        value: "devkey",
+        description: "livekit api key matching the livekit server configuration.",
+      },
+      LIVEKIT_API_SECRET: {
+        value: "secret",
+        description: "livekit api secret matching the livekit server configuration.",
+      },
+      OPENAI_API_KEY: {
+        preserveExisting: true,
+        description: "openai api key used by the agent for speech, language, and voice models.",
+      },
+      OTEL_EXPORTER_OTLP_ENDPOINT: {
+        value: "http://${{phoenix.RAILWAY_PRIVATE_DOMAIN}}:6006",
+        description: "private phoenix otlp/http endpoint used to export agent traces.",
+      },
+      OTEL_EXPORTER_OTLP_PROTOCOL: {
+        value: "http/protobuf",
+        description: "otlp protocol used by the agent trace exporter.",
+      },
+      OTEL_SERVICE_NAME: {
+        value: "livekit-agent",
+        description: "service name shown for agent traces in phoenix.",
+      },
     },
   });
 
   const app = service("app", {
     source: github(repository, { rootDirectory: "app" }),
     env: {
-      NUXT_LIVEKIT_API_KEY: "devkey",
-      NUXT_LIVEKIT_API_SECRET: "secret",
-      NUXT_PUBLIC_LIVEKIT_URL:
-        "ws://${{livekit.RAILWAY_TCP_PROXY_DOMAIN}}:${{livekit.RAILWAY_TCP_PROXY_PORT}}",
+      NUXT_LIVEKIT_API_KEY: {
+        value: "devkey",
+        description: "livekit api key used by the web application token endpoint.",
+      },
+      NUXT_LIVEKIT_API_SECRET: {
+        value: "secret",
+        description: "livekit api secret used by the web application token endpoint.",
+      },
+      NUXT_PUBLIC_LIVEKIT_URL: {
+        value:
+          "ws://${{livekit.RAILWAY_TCP_PROXY_DOMAIN}}:${{livekit.RAILWAY_TCP_PROXY_PORT}}",
+        description: "public websocket URL used by browsers to connect to livekit.",
+      },
     },
   });
 
