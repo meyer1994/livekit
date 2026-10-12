@@ -27,7 +27,7 @@ Run commands from the repository root unless noted otherwise.
 ```bash
 cd agent
 uv sync --locked
-uv run --locked --no-sync python -m py_compile agent.py audio_trace.py
+uv run --locked --no-sync python -m py_compile agent.py
 ```
 
 Run the agent locally with:
