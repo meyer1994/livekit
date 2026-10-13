@@ -29,8 +29,13 @@ type ConversationEntry = LogEntry & {
   text: string
 }
 
+type TranscriptionEntry = ConversationEntry & {
+  segmentId: string
+  final: boolean
+}
+
 const events = ref<LogEntry[]>([])
-const transcriptions = ref<ConversationEntry[]>([])
+const transcriptions = ref<TranscriptionEntry[]>([])
 const messages = ref<ConversationEntry[]>([])
 let entryId = 0
 
@@ -83,22 +88,28 @@ function recordEvent(name: string, payload: unknown) {
   })
 }
 
-function recordTranscription(transcripts: TranscriptionSegment[]) {
-  transcripts
-    .filter(transcript => transcript.final)
-    .forEach(transcript => {
-      const entry = {
-        id: ++entryId,
-        text: readableText(transcript.text),
-        name: 'transcription-received',
-        payload: formatPayload(transcript),
-        time: new Date().toLocaleTimeString()
-      }
-      transcriptions.value.push(entry)
-      events.value.push({ ...entry })
-    })
+function recordTranscription(segments: TranscriptionSegment[]) {
+  segments.forEach((segment) => {
+    const existing = transcriptions.value.find(entry => entry.segmentId === segment.id)
 
-  transcripts.forEach(transcript => recordEvent('transcription-received', transcript))
+    if (existing) {
+      existing.text = segment.text
+      existing.final = segment.final
+      existing.payload = formatPayload(segment)
+    } else {
+      transcriptions.value.push({
+        id: ++entryId,
+        segmentId: segment.id,
+        final: segment.final,
+        text: segment.text,
+        name: 'transcription-received',
+        payload: formatPayload(segment),
+        time: new Date().toLocaleTimeString()
+      })
+    }
+
+    recordEvent('transcription-received', segment)
+  })
 }
 
 function recordMessage(payload: unknown) {
@@ -376,7 +387,10 @@ const {
                             <span>{{ transcription.name }}</span>
                             <time>{{ transcription.time }}</time>
                           </div>
-                          <p class="mt-2 text-sm text-highlighted">
+                          <p
+                            class="mt-2 text-sm"
+                            :class="transcription.final ? 'text-highlighted' : 'text-muted'"
+                          >
                             {{ transcription.text }}
                           </p>
                         </article>
