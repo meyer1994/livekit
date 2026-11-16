@@ -16,7 +16,7 @@
     "@nuxt/ui": "^4.11.0",
     "livekit-client": "^2.22.0",
     "livekit-server-sdk": "^2.18.0",
-    "nuxt": "^4.5.2",
+    "nuxt": "^4.6.4",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
